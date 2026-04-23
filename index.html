@@ -59,11 +59,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 #np-year{
   font-size:2.2rem;font-weight:900;letter-spacing:-.03em;line-height:1;
   background:linear-gradient(135deg,#ff6b9d,#a29bfe);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  transition:opacity .3s
 }
-#np-info{display:flex;flex-direction:column;gap:2px;overflow:hidden}
+#np-info{display:flex;flex-direction:column;gap:2px;overflow:hidden;transition:opacity .3s}
 #np-title{font-size:.95rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
 #np-artist{font-size:.78rem;color:var(--c4);font-weight:400}
+@keyframes np-flash{0%{opacity:.3}100%{opacity:1}}
+.np-change{animation:np-flash .4s ease-out}
 #streak{
   display:flex;align-items:center;gap:6px;padding:0 18px;border-left:1px solid rgba(255,255,255,.07);
   opacity:0;transition:opacity .4s
@@ -105,10 +108,12 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 .face-card{
   position:absolute;border-radius:10px;overflow:hidden;
   border:1.5px solid rgba(255,255,255,.15);
-  background-size:cover;background-position:center top;
+  background-size:cover;background-position:center center;
   background-color:#1a1a2e;
-  cursor:pointer;transition:box-shadow .2s;
-  box-shadow:0 3px 14px rgba(0,0,0,.55)
+  cursor:pointer;
+  transition:box-shadow .2s,transform .15s;
+  box-shadow:0 3px 14px rgba(0,0,0,.55);
+  will-change:transform,opacity;
 }
 .face-card:hover{box-shadow:0 4px 22px rgba(255,255,255,.18),0 3px 14px rgba(0,0,0,.55)}
 .face-card.rank1{border-color:var(--c1);box-shadow:0 0 16px rgba(255,107,157,.5),0 3px 14px rgba(0,0,0,.5)}
@@ -406,8 +411,8 @@ const GENRE_BG = {
   'R&B':'#1a4a3a','트로트':'#5c2a1a','록':'#1a1a5c','솔로':'#1a5c3a'
 };
 const RANKS = 5;
-const WINDOW = 8; // years visible at once
-const TICK_MS = 3500;
+const WINDOW = 5; // years visible at once
+const TICK_MS = 7000;
 const START_YEAR = 1992;
 const END_YEAR = 2023;
 
@@ -449,7 +454,7 @@ const svg = d3.select('#lines-svg');
 // RENDER
 // ══════════════════════════════════════════════════════════
 function render(animated) {
-  const dur = animated ? 850 : 0;
+  const dur = animated ? 1200 : 0;
   const { W, H } = chartDims();
   const rh = H / WINDOW;
   const lw = W / RANKS;
@@ -515,12 +520,12 @@ function render(animated) {
         .attr('stroke-width', 2.5)
         .attr('stroke-linecap','round')
         .attr('stroke-opacity', 0)
-        .call(el => el.transition().duration(dur).attr('stroke-opacity', .45)),
-      u => u.transition().duration(dur)
+        .call(el => el.transition().duration(dur).ease(d3.easeCubicOut).attr('stroke-opacity', .5)),
+      u => u.transition().duration(dur).ease(d3.easeCubicInOut)
         .attr('d', d => lineGen(d.pts))
         .attr('stroke', d => RANK_COLORS[d.pts[d.pts.length-1].r - 1] || '#555')
-        .attr('stroke-opacity', .45),
-      ex => ex.transition().duration(dur/2).attr('stroke-opacity',0).remove()
+        .attr('stroke-opacity', .5),
+      ex => ex.transition().duration(dur * 0.5).ease(d3.easeQuadIn).attr('stroke-opacity',0).remove()
     );
 
   // ── Rank-1 glow line ──
@@ -531,15 +536,15 @@ function render(animated) {
         .attr('fill','none')
         .attr('d', d => lineGen(d.pts))
         .attr('stroke','#ff6b9d')
-        .attr('stroke-width', 9)
+        .attr('stroke-width', 10)
         .attr('stroke-linecap','round')
         .attr('filter','url(#glow-filter)')
         .attr('stroke-opacity',0)
-        .call(el => el.transition().duration(dur).attr('stroke-opacity',.25)),
-      u => u.transition().duration(dur)
+        .call(el => el.transition().duration(dur).ease(d3.easeCubicOut).attr('stroke-opacity',.3)),
+      u => u.transition().duration(dur).ease(d3.easeCubicInOut)
         .attr('d', d => lineGen(d.pts))
-        .attr('stroke-opacity',.25),
-      ex => ex.transition().duration(dur/2).attr('stroke-opacity',0).remove()
+        .attr('stroke-opacity',.3),
+      ex => ex.transition().duration(dur * 0.5).ease(d3.easeQuadIn).attr('stroke-opacity',0).remove()
     );
 
   // SVG filter for glow (create once)
@@ -554,8 +559,9 @@ function render(animated) {
 
   // ── Face cards ──
   const faces = d3.select('#faces');
-  const CW = lw - 16;
-  const CH = rh - 12;
+  // Fixed 4:3 card size, centered in lane/row
+  const CW = Math.min(lw - 20, 210);
+  const CH = Math.round(CW * 0.7);
 
   const cards = faces.selectAll('.face-card')
     .data(visible, d => d.t + '|' + d.y);
@@ -568,9 +574,10 @@ function render(animated) {
     .style('top',    d => (yearY(d.y) - CH/2) + 'px')
     .style('border-color', d => RANK_COLORS[d.r-1])
     .style('background-image', d => d.id
-      ? `url(https://img.youtube.com/vi/${d.id}/mqdefault.jpg)` : null)
+      ? `url(https://img.youtube.com/vi/${d.id}/hqdefault.jpg)` : null)
     .style('background-color', d => !d.id ? (GENRE_BG[d.g] || '#1a1a2e') : null)
     .style('opacity', 0)
+    .style('transform', 'scale(0.85)')
     .on('click', (ev, d) => {
       if (d.id) {
         goToYear(d.y, false);
@@ -584,28 +591,31 @@ function render(animated) {
   entered.append('div').attr('class','card-rank-badge')
     .text(d => d.r + '위');
 
-  // animate in
-  entered.transition().duration(dur)
-    .style('opacity', d => cardOpacity(d));
+  // animate in with scale
+  entered.transition().duration(dur).ease(d3.easeCubicOut)
+    .style('opacity', d => cardOpacity(d))
+    .style('transform', 'scale(1)');
 
   // update existing
-  cards.transition().duration(dur)
+  cards.transition().duration(dur).ease(d3.easeCubicInOut)
     .style('left',  d => (laneX(d.r) - CW/2) + 'px')
     .style('top',   d => (yearY(d.y) - CH/2) + 'px')
     .style('width', CW + 'px')
     .style('height',CH + 'px')
-    .style('opacity', d => cardOpacity(d));
+    .style('opacity', d => cardOpacity(d))
+    .style('transform', 'scale(1)');
 
-  // exit (slide up)
-  cards.exit().transition().duration(dur * 0.6)
+  // exit — fade + gentle drift up
+  cards.exit().transition().duration(dur * 0.7).ease(d3.easeQuadIn)
     .style('opacity', 0)
-    .style('top', d => (yearY(d.y) - CH/2 - rh * 0.6) + 'px')
+    .style('transform', 'scale(0.88)')
     .remove();
 }
 
 function cardOpacity(d) {
   const age = currentYear - d.y;
-  return Math.max(0.05, 1 - age * 0.1);
+  // gentle fade: 1.0 → 0.35 over WINDOW years
+  return Math.max(0.15, 1 - age * (0.65 / WINDOW));
 }
 
 // ══════════════════════════════════════════════════════════
@@ -613,10 +623,16 @@ function cardOpacity(d) {
 // ══════════════════════════════════════════════════════════
 function updateHeader() {
   const top1 = songs.find(s => s.y === currentYear && s.r === 1);
-  document.getElementById('np-year').textContent = currentYear;
+  const yearEl = document.getElementById('np-year');
+  const infoEl = document.getElementById('np-info');
+  yearEl.textContent = currentYear;
+  yearEl.classList.remove('np-change'); void yearEl.offsetWidth;
+  yearEl.classList.add('np-change');
   if (top1) {
     document.getElementById('np-title').textContent = top1.t;
     document.getElementById('np-artist').textContent = top1.a;
+    infoEl.classList.remove('np-change'); void infoEl.offsetWidth;
+    infoEl.classList.add('np-change');
   }
 
   // Streak
@@ -644,8 +660,7 @@ function loadSong(ytId, title, artist, year) {
   if (!ytReady || !ytId || muted) return;
   if (ytId === lastYtId) return;
   lastYtId = ytId;
-  try { ytPlayer.loadVideoById(ytId, 0); } catch(e) {}
-  // Update header to clicked song
+  try { ytPlayer.loadVideoById({ videoId: ytId, startSeconds: 38 }); } catch(e) {}
   document.getElementById('np-year').textContent  = year;
   document.getElementById('np-title').textContent  = title;
   document.getElementById('np-artist').textContent = artist;
