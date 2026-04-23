@@ -111,9 +111,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
   background-size:cover;background-position:center center;
   background-color:#1a1a2e;
   cursor:pointer;
-  transition:box-shadow .2s,transform .15s;
+  transition:box-shadow .2s;
   box-shadow:0 3px 14px rgba(0,0,0,.55);
-  will-change:transform,opacity;
+  will-change:top,opacity;
 }
 .face-card:hover{box-shadow:0 4px 22px rgba(255,255,255,.18),0 3px 14px rgba(0,0,0,.55)}
 .face-card.rank1{border-color:var(--c1);box-shadow:0 0 16px rgba(255,107,157,.5),0 3px 14px rgba(0,0,0,.5)}
@@ -289,13 +289,13 @@ const songs = [
   {y:1995,r:2,t:"날개잃은 천사",a:"룰라",id:null,g:"댄스"},
   {y:1995,r:3,t:"이별이별",a:"박미경",id:null,g:"발라드"},
   // ── 1996 ──────────────────────────────
-  {y:1996,r:1,t:"전사의 후예",a:"H.O.T.",id:"3NUaXU1d-NY",g:"아이돌"},
-  {y:1996,r:2,t:"폼생폼사",a:"젝스키스",id:null,g:"아이돌"},
+  {y:1996,r:1,t:"캔디",a:"H.O.T.",id:"3NUaXU1d-NY",g:"아이돌"},
+  {y:1996,r:2,t:"전사의 후예",a:"H.O.T.",id:null,g:"아이돌"},
   {y:1996,r:3,t:"쿵따리 샤바라",a:"클론",id:null,g:"댄스"},
   // ── 1997 ──────────────────────────────
-  {y:1997,r:1,t:"캔디",a:"H.O.T.",id:"3NUaXU1d-NY",g:"아이돌"},
-  {y:1997,r:2,t:"I'm Your Girl",a:"S.E.S.",id:"fBge8oUfFwU",g:"아이돌"},
-  {y:1997,r:3,t:"커플",a:"젝스키스",id:null,g:"아이돌"},
+  {y:1997,r:1,t:"I'm Your Girl",a:"S.E.S.",id:"fBge8oUfFwU",g:"아이돌"},
+  {y:1997,r:2,t:"캔디",a:"H.O.T.",id:"3NUaXU1d-NY",g:"아이돌"},
+  {y:1997,r:3,t:"기사 맹세",a:"젝스키스",id:null,g:"아이돌"},
   // ── 1998 ──────────────────────────────
   {y:1998,r:1,t:"아시나요",a:"조성모",id:"Nn8pgNZPMwg",g:"발라드"},
   {y:1998,r:2,t:"블루레인",a:"핑클",id:null,g:"아이돌"},
@@ -403,330 +403,330 @@ const songs = [
 ];
 
 // ══════════════════════════════════════════════════════════
-// CONSTANTS & STATE
+// CONSTANTS
 // ══════════════════════════════════════════════════════════
 const RANK_COLORS = ['#ff6b9d','#ff9f43','#fdcb6e','#a29bfe','#636e72'];
 const GENRE_BG = {
   '발라드':'#1a2560','댄스':'#5c1a3a','아이돌':'#3a1a5c','힙합':'#5c4a1a',
   'R&B':'#1a4a3a','트로트':'#5c2a1a','록':'#1a1a5c','솔로':'#1a5c3a'
 };
-const RANKS = 5;
-const WINDOW = 5; // years visible at once
-const TICK_MS = 7000;
+const RANKS      = 5;
+const WINDOW     = 5;         // years visible in chart at once
 const START_YEAR = 1992;
-const END_YEAR = 2023;
+const END_YEAR   = 2023;
+const YEAR_SPEED = 1 / 10000; // 1 year per 10 000 ms → smooth continuous scroll
 
-let currentYear = START_YEAR;
+// ══════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════
+let yrF = START_YEAR;    // float year — drives visual position
+let yrI = START_YEAR;    // integer year — drives audio / header
 let playing = false;
-let muted = false;
-let tickTimer = null;
+let muted   = false;
+let rafId   = null;
+let lastTs  = null;
+let lastSongKey = null;
 let streakCount = 0;
 let streakArtist = '';
 let draggingSlider = false;
 let slider = null;
 
+// Map of "title|year" → { el, dying, slideTimer }
+const cardEls = new Map();
+
 // ══════════════════════════════════════════════════════════
-// LAYOUT HELPERS  (re-computed on resize)
+// LAYOUT
 // ══════════════════════════════════════════════════════════
 function chartDims() {
-  const wrap = document.getElementById('chart-wrap');
-  return { W: wrap.clientWidth, H: wrap.clientHeight };
+  const w = document.getElementById('chart-wrap');
+  return { W: w.clientWidth, H: w.clientHeight };
 }
-function laneX(rank) { // center x of rank lane (rank 1..5)
+function laneX(rank) {
   const { W } = chartDims();
   const lw = W / RANKS;
   return (rank - 1) * lw + lw / 2;
 }
-function yearY(year) { // y position: currentYear at top (ROW_H/2), older below
+function yearY(year) {        // uses float yrF for smooth positioning
   const { H } = chartDims();
-  const rowH = H / WINDOW;
-  return (currentYear - year + 0.5) * rowH;
+  return (yrF - year + 0.5) * (H / WINDOW);
 }
-function rowH() { const { H } = chartDims(); return H / WINDOW; }
-function laneW() { const { W } = chartDims(); return W / RANKS; }
+function cardSize() {
+  const { W, H } = chartDims();
+  const lw = W / RANKS;
+  const rh = H / WINDOW;
+  const CW = Math.min(lw - 24, 200);
+  const CH = Math.round(CW * 0.72);
+  return { CW, CH, rh, lw };
+}
+function cardOpacity(s) {
+  const age = yrF - s.y;
+  return Math.max(0.10, 1 - age * (0.72 / WINDOW));
+}
 
 // ══════════════════════════════════════════════════════════
-// D3 SETUP
+// D3 SVG  +  GLOW FILTER
 // ══════════════════════════════════════════════════════════
 const svg = d3.select('#lines-svg');
+(function createGlow() {
+  const defs   = svg.append('defs');
+  const filter = defs.append('filter').attr('id','glow-filter').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  filter.append('feGaussianBlur').attr('stdDeviation','6').attr('result','blur');
+  const merge  = filter.append('feMerge');
+  merge.append('feMergeNode').attr('in','blur');
+  merge.append('feMergeNode').attr('in','SourceGraphic');
+})();
 
 // ══════════════════════════════════════════════════════════
-// RENDER
+// LINES — rebuild path elements when integer year changes
+//          updateLines() recalculates path `d` every frame
 // ══════════════════════════════════════════════════════════
-function render(animated) {
-  const dur = animated ? 1200 : 0;
-  const { W, H } = chartDims();
-  const rh = H / WINDOW;
-  const lw = W / RANKS;
-
-  // visible range: currentYear at top, going back WINDOW years
-  const winStart = currentYear - WINDOW + 1;
-  const winEnd   = currentYear;
-  const visible  = songs.filter(s => s.y >= winStart && s.y <= winEnd);
-
-  // ── Year background text ──
-  document.getElementById('year-bg').textContent = currentYear;
-
-  // ── Current-line position ──
-  d3.select('#current-line')
-    .transition().duration(dur)
-    .style('top', (rh * 0.5 - 1) + 'px');
-
-  // ── Lane dividers (once) ──
-  if (!document.querySelector('.lane-div')) {
-    for (let r = 1; r < RANKS; r++) {
-      const div = document.createElement('div');
-      div.className = 'lane-div';
-      div.style.left = (r * lw) + 'px';
-      document.getElementById('chart-wrap').appendChild(div);
-    }
-  }
-
-  // ── SVG artist trajectory lines ──
-  svg.attr('viewBox', `0 0 ${W} ${H}`);
-
+function buildSegments() {
+  const winStart = yrI - WINDOW + 1;
+  const visible  = songs.filter(s => s.y >= winStart && s.y <= yrI);
   const byArtist = d3.group(visible, d => d.a);
-  const paths = [];
-  byArtist.forEach((artistSongs, artist) => {
-    const pts = artistSongs.slice().sort((a,b) => a.y - b.y);
-    if (pts.length < 2) return;
-    // only connect consecutive years
-    const segments = [];
+  const segs = [];
+  byArtist.forEach((pts, artist) => {
+    pts = pts.slice().sort((a,b) => a.y - b.y);
     let seg = [pts[0]];
     for (let i = 1; i < pts.length; i++) {
-      if (pts[i].y - pts[i-1].y <= 1) {
-        seg.push(pts[i]);
-      } else {
-        if (seg.length >= 2) segments.push(seg);
-        seg = [pts[i]];
-      }
+      if (pts[i].y - pts[i-1].y <= 1) { seg.push(pts[i]); }
+      else { if (seg.length >= 2) segs.push({ artist, pts: seg }); seg = [pts[i]]; }
     }
-    if (seg.length >= 2) segments.push(seg);
-    segments.forEach(s => paths.push({ artist, pts: s }));
+    if (seg.length >= 2) segs.push({ artist, pts: seg });
   });
+  return segs;
+}
+
+function rebuildLines() {
+  const segs = buildSegments();
+  const r1   = segs.filter(s => s.pts.some(p => p.r === 1));
+  const rest = segs.filter(s => !s.pts.some(p => p.r === 1));
+
+  const key = d => d.artist + ':' + d.pts[0].y;
+  svg.selectAll('.a-path').data(rest, key).join('path')
+    .attr('class','a-path').attr('fill','none')
+    .attr('stroke', d => RANK_COLORS[d.pts[0].r - 1] || '#555')
+    .attr('stroke-width', 1.5).attr('stroke-linecap','round').attr('stroke-opacity',.28);
+
+  svg.selectAll('.glow-path').data(r1, key).join('path')
+    .attr('class','glow-path').attr('fill','none')
+    .attr('stroke','#ff6b9d').attr('stroke-width',18).attr('stroke-linecap','round')
+    .attr('filter','url(#glow-filter)').attr('stroke-opacity',.22);
+
+  svg.selectAll('.rank1-path').data(r1, key).join('path')
+    .attr('class','rank1-path').attr('fill','none')
+    .attr('stroke','#ff6b9d').attr('stroke-width',3.5).attr('stroke-linecap','round').attr('stroke-opacity',.9);
+}
+
+function updateLines() {
+  const { W, H } = chartDims();
+  svg.attr('viewBox', `0 0 ${W} ${H}`);
 
   const lineGen = d3.line()
-    .x(d => laneX(d.r))
-    .y(d => yearY(d.y))
+    .x(d => laneX(d.r)).y(d => yearY(d.y))
     .curve(d3.curveCatmullRom.alpha(0.5));
 
-  svg.selectAll('.a-path')
-    .data(paths, d => d.artist + d.pts[0].y)
-    .join(
-      e => e.append('path').attr('class','a-path')
-        .attr('fill','none')
-        .attr('d', d => lineGen(d.pts))
-        .attr('stroke', d => RANK_COLORS[d.pts[d.pts.length-1].r - 1] || '#555')
-        .attr('stroke-width', 2.5)
-        .attr('stroke-linecap','round')
-        .attr('stroke-opacity', 0)
-        .call(el => el.transition().duration(dur).ease(d3.easeCubicOut).attr('stroke-opacity', .5)),
-      u => u.transition().duration(dur).ease(d3.easeCubicInOut)
-        .attr('d', d => lineGen(d.pts))
-        .attr('stroke', d => RANK_COLORS[d.pts[d.pts.length-1].r - 1] || '#555')
-        .attr('stroke-opacity', .5),
-      ex => ex.transition().duration(dur * 0.5).ease(d3.easeQuadIn).attr('stroke-opacity',0).remove()
-    );
+  const pathFn = d => lineGen(d.pts);
+  svg.selectAll('.a-path, .glow-path, .rank1-path').attr('d', pathFn);
 
-  // ── Rank-1 glow line ──
-  svg.selectAll('.glow-path')
-    .data(paths.filter(p => p.pts.some(pt => pt.r === 1)), d => d.artist + d.pts[0].y)
-    .join(
-      e => e.append('path').attr('class','glow-path')
-        .attr('fill','none')
-        .attr('d', d => lineGen(d.pts))
-        .attr('stroke','#ff6b9d')
-        .attr('stroke-width', 10)
-        .attr('stroke-linecap','round')
-        .attr('filter','url(#glow-filter)')
-        .attr('stroke-opacity',0)
-        .call(el => el.transition().duration(dur).ease(d3.easeCubicOut).attr('stroke-opacity',.3)),
-      u => u.transition().duration(dur).ease(d3.easeCubicInOut)
-        .attr('d', d => lineGen(d.pts))
-        .attr('stroke-opacity',.3),
-      ex => ex.transition().duration(dur * 0.5).ease(d3.easeQuadIn).attr('stroke-opacity',0).remove()
-    );
-
-  // SVG filter for glow (create once)
-  if (!svg.select('#glow-filter').node()) {
-    const defs = svg.append('defs');
-    const filter = defs.append('filter').attr('id','glow-filter');
-    filter.append('feGaussianBlur').attr('stdDeviation','5').attr('result','blur');
-    const merge = filter.append('feMerge');
-    merge.append('feMergeNode').attr('in','blur');
-    merge.append('feMergeNode').attr('in','SourceGraphic');
-  }
-
-  // ── Face cards ──
-  const faces = d3.select('#faces');
-  // Fixed 4:3 card size, centered in lane/row
-  const CW = Math.min(lw - 20, 210);
-  const CH = Math.round(CW * 0.7);
-
-  const cards = faces.selectAll('.face-card')
-    .data(visible, d => d.t + '|' + d.y);
-
-  const entered = cards.enter().append('div')
-    .attr('class', d => `face-card rank${d.r}`)
-    .style('width',  CW + 'px')
-    .style('height', CH + 'px')
-    .style('left',   d => (laneX(d.r) - CW/2) + 'px')
-    .style('top',    d => (yearY(d.y) - CH/2) + 'px')
-    .style('border-color', d => RANK_COLORS[d.r-1])
-    .style('background-image', d => d.id
-      ? `url(https://img.youtube.com/vi/${d.id}/hqdefault.jpg)` : null)
-    .style('background-color', d => !d.id ? (GENRE_BG[d.g] || '#1a1a2e') : null)
-    .style('opacity', 0)
-    .style('transform', 'scale(0.85)')
-    .on('click', (ev, d) => {
-      if (d.id) {
-        goToYear(d.y, false);
-        loadSong(d.id, d.t, d.a, d.y);
-      }
-    });
-
-  entered.append('div').attr('class','card-overlay')
-    .html(d => `<span class="card-title">${d.t}</span><span class="card-artist">${d.a}</span>`);
-
-  entered.append('div').attr('class','card-rank-badge')
-    .text(d => d.r + '위');
-
-  // animate in with scale
-  entered.transition().duration(dur).ease(d3.easeCubicOut)
-    .style('opacity', d => cardOpacity(d))
-    .style('transform', 'scale(1)');
-
-  // update existing
-  cards.transition().duration(dur).ease(d3.easeCubicInOut)
-    .style('left',  d => (laneX(d.r) - CW/2) + 'px')
-    .style('top',   d => (yearY(d.y) - CH/2) + 'px')
-    .style('width', CW + 'px')
-    .style('height',CH + 'px')
-    .style('opacity', d => cardOpacity(d))
-    .style('transform', 'scale(1)');
-
-  // exit — fade + gentle drift up
-  cards.exit().transition().duration(dur * 0.7).ease(d3.easeQuadIn)
-    .style('opacity', 0)
-    .style('transform', 'scale(0.88)')
-    .remove();
-}
-
-function cardOpacity(d) {
-  const age = currentYear - d.y;
-  // gentle fade: 1.0 → 0.35 over WINDOW years
-  return Math.max(0.15, 1 - age * (0.65 / WINDOW));
+  const rh = H / WINDOW;
+  d3.select('#current-line').style('top', (rh * 0.5 - 1) + 'px');
+  document.getElementById('year-bg').textContent = yrI;
 }
 
 // ══════════════════════════════════════════════════════════
-// HEADER  (now-playing info + streak)
+// CARDS — DOM-managed; position updated each RAF frame
+// ══════════════════════════════════════════════════════════
+function rebuildCards() {
+  const { CW, CH, rh } = cardSize();
+  const winStart = yrI - WINDOW + 1;
+  const visible  = songs.filter(s => s.y >= winStart && s.y <= yrI);
+  const visKeys  = new Set(visible.map(s => s.t + '|' + s.y));
+  const facesEl  = document.getElementById('faces');
+
+  // Remove cards that left the window
+  for (const [key, info] of cardEls) {
+    if (!visKeys.has(key) && !info.dying) {
+      info.dying = true;
+      clearTimeout(info.slideTimer);
+      info.el.style.transition = 'opacity 0.45s ease';
+      info.el.style.opacity = '0';
+      setTimeout(() => { try { info.el.remove(); } catch(e){} cardEls.delete(key); }, 480);
+    }
+  }
+
+  // Add new cards
+  for (const s of visible) {
+    const key = s.t + '|' + s.y;
+    if (cardEls.has(key)) continue;
+
+    const el = document.createElement('div');
+    el.className = `face-card rank${s.r}`;
+    el.style.width   = CW + 'px';
+    el.style.height  = CH + 'px';
+    el.style.borderColor = RANK_COLORS[s.r - 1];
+    if (s.id) el.style.backgroundImage = `url(https://img.youtube.com/vi/${s.id}/hqdefault.jpg)`;
+    else      el.style.backgroundColor = GENRE_BG[s.g] || '#1a1a2e';
+
+    // Start above target, translate down via CSS transform
+    el.style.left      = (laneX(s.r) - CW / 2) + 'px';
+    el.style.top       = (yearY(s.y) - CH / 2) + 'px';
+    el.style.transform = `translateY(-${rh * 0.75}px)`;
+    el.style.opacity   = '0';
+
+    el.innerHTML = `
+      <div class="card-overlay">
+        <span class="card-title">${s.t}</span>
+        <span class="card-artist">${s.a}</span>
+      </div>
+      <div class="card-rank-badge">${s.r}위</div>`;
+
+    el.addEventListener('click', () => { if (s.id) loadSong(s.id, s.t, s.a, s.y); });
+    facesEl.appendChild(el);
+
+    const info = { el, dying: false, slideTimer: null };
+    cardEls.set(key, info);
+
+    // Animate: slide down + fade in
+    requestAnimationFrame(() => {
+      el.style.transition = 'opacity 0.7s ease, transform 0.9s cubic-bezier(0.22,1,0.36,1)';
+      el.style.opacity    = String(cardOpacity(s));
+      el.style.transform  = 'translateY(0)';
+      // Remove transform after slide-in so RAF can freely update `top`
+      info.slideTimer = setTimeout(() => {
+        if (!info.dying) { el.style.transition = ''; el.style.transform = ''; }
+      }, 950);
+    });
+  }
+}
+
+function updatePositions() {
+  const { CW, CH } = cardSize();
+  const winStart = yrI - WINDOW + 1;
+  const visible  = songs.filter(s => s.y >= winStart && s.y <= yrI);
+  for (const s of visible) {
+    const info = cardEls.get(s.t + '|' + s.y);
+    if (!info || info.dying) continue;
+    // Only update if not mid-slide-in (transform still animating)
+    if (info.el.style.transition !== '') continue;
+    info.el.style.left    = (laneX(s.r) - CW / 2) + 'px';
+    info.el.style.top     = (yearY(s.y) - CH / 2) + 'px';
+    info.el.style.opacity = String(cardOpacity(s));
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// HEADER
 // ══════════════════════════════════════════════════════════
 function updateHeader() {
-  const top1 = songs.find(s => s.y === currentYear && s.r === 1);
+  const top1  = songs.find(s => s.y === yrI && s.r === 1);
   const yearEl = document.getElementById('np-year');
   const infoEl = document.getElementById('np-info');
-  yearEl.textContent = currentYear;
-  yearEl.classList.remove('np-change'); void yearEl.offsetWidth;
-  yearEl.classList.add('np-change');
+  yearEl.textContent = yrI;
+  yearEl.classList.remove('np-change'); void yearEl.offsetWidth; yearEl.classList.add('np-change');
   if (top1) {
-    document.getElementById('np-title').textContent = top1.t;
+    document.getElementById('np-title').textContent  = top1.t;
     document.getElementById('np-artist').textContent = top1.a;
-    infoEl.classList.remove('np-change'); void infoEl.offsetWidth;
-    infoEl.classList.add('np-change');
-  }
-
-  // Streak
-  if (top1) {
-    const prevTop = songs.find(s => s.y === currentYear - 1 && s.r === 1);
-    if (prevTop && prevTop.a === top1.a) {
+    infoEl.classList.remove('np-change'); void infoEl.offsetWidth; infoEl.classList.add('np-change');
+    const prev = songs.find(s => s.y === yrI - 1 && s.r === 1);
+    if (prev && prev.a === top1.a) {
       if (streakArtist !== top1.a) { streakCount = 2; streakArtist = top1.a; }
       else streakCount++;
       document.getElementById('streak-num').textContent = streakCount;
       document.getElementById('streak').classList.add('show');
     } else {
-      streakCount = 1;
-      streakArtist = top1.a;
+      streakCount = 1; streakArtist = top1.a;
       document.getElementById('streak').classList.remove('show');
     }
   }
 }
 
 // ══════════════════════════════════════════════════════════
-// YOUTUBE PLAYBACK
+// YOUTUBE
 // ══════════════════════════════════════════════════════════
-let lastYtId = null;
-
 function loadSong(ytId, title, artist, year) {
   if (!ytReady || !ytId || muted) return;
-  if (ytId === lastYtId) return;
-  lastYtId = ytId;
-  try { ytPlayer.loadVideoById({ videoId: ytId, startSeconds: 38 }); } catch(e) {}
-  document.getElementById('np-year').textContent  = year;
+  const key = year + ':' + ytId;
+  if (key === lastSongKey) return;
+  lastSongKey = key;
+  try { ytPlayer.loadVideoById({ videoId: ytId, startSeconds: 30 }); } catch(e) {}
+  document.getElementById('np-year').textContent   = year;
   document.getElementById('np-title').textContent  = title;
   document.getElementById('np-artist').textContent = artist;
 }
 
 function playCurrent() {
-  const top1 = songs.find(s => s.y === currentYear && s.r === 1);
-  if (top1 && top1.id && !muted && ytReady) {
-    loadSong(top1.id, top1.t, top1.a, top1.y);
-  }
+  const top1 = songs.find(s => s.y === yrI && s.r === 1);
+  if (top1 && top1.id && !muted && ytReady) loadSong(top1.id, top1.t, top1.a, top1.y);
 }
 
 function stopAudio() {
   if (ytReady) try { ytPlayer.stopVideo(); } catch(e) {}
-  lastYtId = null;
+  lastSongKey = null;
 }
 
 // ══════════════════════════════════════════════════════════
-// NAVIGATION
+// RAF LOOP — continuous scroll
 // ══════════════════════════════════════════════════════════
-function goToYear(year, autoAdvance) {
-  currentYear = Math.max(START_YEAR, Math.min(END_YEAR, year));
-  render(true);
-  updateHeader();
-  if (!draggingSlider && slider) { slider.set(currentYear); }
-  if (autoAdvance || !autoAdvance) playCurrent();
+function frame(ts) {
+  if (!playing) { lastTs = null; return; }
+  if (lastTs !== null) {
+    const dt  = Math.min(ts - lastTs, 80); // cap frame delta
+    yrF += YEAR_SPEED * dt;
+
+    if (yrF >= END_YEAR + 0.08) {
+      yrF = END_YEAR; updatePositions(); updateLines(); stopPlay(); return;
+    }
+
+    const newI = Math.min(END_YEAR, Math.round(yrF));
+    if (newI !== yrI) {
+      yrI = newI;
+      rebuildCards();
+      rebuildLines();
+      updateHeader();
+      playCurrent();
+    }
+    updatePositions();
+    updateLines();
+    if (!draggingSlider && slider) slider.set(yrF, false);
+  }
+  lastTs = ts;
+  rafId  = requestAnimationFrame(frame);
 }
 
 // ══════════════════════════════════════════════════════════
-// PLAY / PAUSE  TICK
+// PLAY / PAUSE
 // ══════════════════════════════════════════════════════════
-function tick() {
-  if (!playing) return;
-  if (currentYear >= END_YEAR) { stopPlay(); return; }
-  goToYear(currentYear + 1, true);
-  tickTimer = setTimeout(tick, TICK_MS);
-}
-
 function startPlay() {
+  if (yrF >= END_YEAR) yrF = START_YEAR; // restart if at end
   playing = true;
   document.getElementById('play-pause-btn').textContent = '⏸';
-  tick();
+  lastTs = null;
+  rafId  = requestAnimationFrame(frame);
 }
-
 function stopPlay() {
   playing = false;
-  clearTimeout(tickTimer);
+  cancelAnimationFrame(rafId);
   document.getElementById('play-pause-btn').textContent = '▶';
 }
-
-function togglePlay() {
-  if (playing) stopPlay(); else startPlay();
-}
+function togglePlay() { if (playing) stopPlay(); else startPlay(); }
 
 function toggleMute() {
   muted = !muted;
   const btn = document.getElementById('mute-btn');
-  if (muted) {
-    btn.textContent = '🔇';
-    btn.classList.add('muted');
-    stopAudio();
-  } else {
-    btn.textContent = '🔊';
-    btn.classList.remove('muted');
-    playCurrent();
-  }
+  if (muted) { btn.textContent = '🔇'; btn.classList.add('muted');    stopAudio(); }
+  else        { btn.textContent = '🔊'; btn.classList.remove('muted'); playCurrent(); }
+}
+
+// ══════════════════════════════════════════════════════════
+// NAVIGATION (slider + keyboard)
+// ══════════════════════════════════════════════════════════
+function goToYear(y) {
+  yrF = Math.max(START_YEAR, Math.min(END_YEAR, y));
+  yrI = Math.round(yrF);
+  rebuildCards(); rebuildLines(); updatePositions(); updateLines(); updateHeader();
+  if (!draggingSlider && slider) slider.set(yrF, false);
+  playCurrent();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -736,41 +736,57 @@ function initSlider() {
   const el = document.getElementById('year-slider');
   slider = noUiSlider.create(el, {
     start: [START_YEAR],
-    step: 1,
+    step: 0.02,
     range: { min: START_YEAR, max: END_YEAR },
-    tooltips: [{
-      to: v => Math.round(v) + '년',
-      from: v => Number(v.replace('년',''))
-    }],
+    tooltips: [{ to: v => Math.round(v) + '년', from: v => +v.replace('년','') }],
     pips: {
       mode: 'values',
       values: [1995, 2000, 2005, 2010, 2015, 2020],
       density: 4,
-      format: { to: v => v + '', from: v => Number(v) }
+      format: { to: v => v + '', from: v => +v }
     }
   });
-
   slider.on('start', () => { draggingSlider = true; stopPlay(); });
   slider.on('slide', (vals) => {
-    const yr = Math.round(+vals[0]);
-    currentYear = yr;
-    render(false);
-    updateHeader();
+    yrF = +vals[0]; yrI = Math.round(yrF);
+    rebuildCards(); rebuildLines(); updatePositions(); updateLines(); updateHeader();
   });
-  slider.on('end', (vals) => {
-    draggingSlider = false;
-    const yr = Math.round(+vals[0]);
-    goToYear(yr, false);
-  });
+  slider.on('end', () => { draggingSlider = false; playCurrent(); });
 }
 
 // ══════════════════════════════════════════════════════════
-// SPLASH  →  START
+// INIT LANE DIVIDERS
 // ══════════════════════════════════════════════════════════
-function startExperience() {
-  muted = false;
-  launchApp();
+function initLanes() {
+  const { W } = chartDims();
+  const lw = W / RANKS;
+  for (let r = 1; r < RANKS; r++) {
+    const d = document.createElement('div');
+    d.className = 'lane-div';
+    d.style.left = (r * lw) + 'px';
+    document.getElementById('chart-wrap').appendChild(d);
+  }
 }
+
+// ══════════════════════════════════════════════════════════
+// LAUNCH
+// ══════════════════════════════════════════════════════════
+function launchApp() {
+  document.getElementById('splash').style.cssText = 'opacity:0;transition:opacity .6s';
+  setTimeout(() => document.getElementById('splash').style.display = 'none', 650);
+  document.getElementById('app').classList.add('visible');
+  setTimeout(() => {
+    initLanes();
+    initSlider();
+    rebuildCards();
+    rebuildLines();
+    updatePositions();
+    updateLines();
+    updateHeader();
+    startPlay();
+  }, 120);
+}
+function startExperience() { muted = false; launchApp(); }
 function startMuted() {
   muted = true;
   document.getElementById('mute-btn').textContent = '🔇';
@@ -778,47 +794,40 @@ function startMuted() {
   launchApp();
 }
 
-function launchApp() {
-  const splash = document.getElementById('splash');
-  splash.style.opacity = '0';
-  splash.style.transition = 'opacity .6s';
-  setTimeout(() => splash.style.display = 'none', 650);
-
-  const app = document.getElementById('app');
-  app.classList.add('visible');
-
-  setTimeout(() => {
-    initSlider();
-    render(false);
-    updateHeader();
-    startPlay();
-  }, 100);
-}
-
 // ══════════════════════════════════════════════════════════
 // RESIZE
 // ══════════════════════════════════════════════════════════
-let resizeTimer;
+let _rT;
 window.addEventListener('resize', () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => render(false), 200);
+  clearTimeout(_rT);
+  _rT = setTimeout(() => {
+    document.querySelectorAll('.lane-div').forEach(e => e.remove());
+    initLanes();
+    // reposition card sizes
+    const { CW, CH } = cardSize();
+    for (const [, info] of cardEls) {
+      if (!info.dying) { info.el.style.width = CW + 'px'; info.el.style.height = CH + 'px'; }
+    }
+    rebuildLines();
+    updatePositions();
+    updateLines();
+  }, 200);
 });
 
 // ══════════════════════════════════════════════════════════
 // KEYBOARD
 // ══════════════════════════════════════════════════════════
 document.addEventListener('keydown', e => {
-  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-  if (e.code === 'ArrowRight') { stopPlay(); goToYear(currentYear + 1, false); }
-  if (e.code === 'ArrowLeft')  { stopPlay(); goToYear(currentYear - 1, false); }
-  if (e.code === 'KeyM') toggleMute();
+  if (e.code === 'Space')      { e.preventDefault(); togglePlay(); }
+  if (e.code === 'ArrowRight') { stopPlay(); goToYear(yrF + 1); }
+  if (e.code === 'ArrowLeft')  { stopPlay(); goToYear(yrF - 1); }
+  if (e.code === 'KeyM')       { toggleMute(); }
 });
 
-// button wiring
-document.getElementById('play-pause-btn').onclick = togglePlay;
-document.getElementById('mute-btn').onclick       = toggleMute;
-document.getElementById('start-btn').onclick      = startExperience;
-document.getElementById('start-muted-btn').onclick = startMuted;
+document.getElementById('play-pause-btn').onclick      = togglePlay;
+document.getElementById('mute-btn').onclick            = toggleMute;
+document.getElementById('start-btn').onclick           = startExperience;
+document.getElementById('start-muted-btn').onclick     = startMuted;
 </script>
 </body>
 </html>
