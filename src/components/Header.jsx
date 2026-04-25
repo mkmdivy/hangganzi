@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export default function Header({ year, title, artist, streak, showStreak }) {
+export default function Header({ year, title, artist, genre, streak, showStreak, isPlaying }) {
   const yearRef = useRef(null);
   const infoRef = useRef(null);
 
@@ -22,20 +22,33 @@ export default function Header({ year, title, artist, streak, showStreak }) {
 
   return (
     <div id="header">
-      <div id="now-playing">
+      <div id="header-top">
+        <div className={`eq-bars${isPlaying ? '' : ' paused'}`}>
+          <span className="eq-bar" />
+          <span className="eq-bar" />
+          <span className="eq-bar" />
+          <span className="eq-bar" />
+        </div>
+
         <div id="np-year" ref={yearRef}>{year}</div>
+
         <div id="np-info" ref={infoRef}>
           <div id="np-title">{title}</div>
           <div id="np-artist">{artist}</div>
         </div>
+
+        {genre && <span id="genre-badge">{genre}</span>}
+
+        <div id="streak" className={showStreak ? 'show' : ''}>
+          <span id="streak-icon">🔥</span>
+          <div id="streak-num">{streak}</div>
+          <div id="streak-label">연속<br />1위</div>
+        </div>
       </div>
-      <div id="streak" className={showStreak ? 'show' : ''}>
-        <div id="streak-num">{streak}</div>
-        <div id="streak-label">연속 1위</div>
-      </div>
-      <div id="rank-headers">
-        {[1, 2, 3, 4, 5].map(r => (
-          <div key={r} className="rank-hdr" data-rank={r}>{r}위</div>
+
+      <div id="header-bottom">
+        {[1, 2, 3].map(r => (
+          <div key={r} className="rank-hdr">{r}위</div>
         ))}
       </div>
     </div>

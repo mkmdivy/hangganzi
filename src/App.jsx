@@ -1,23 +1,21 @@
 import { useRef, useState, useEffect } from 'react';
 import * as d3 from 'd3';
 import noUiSlider from 'nouislider';
-import { songs, RANK_COLORS, GENRE_BG, RANKS, WINDOW, START_YEAR, END_YEAR, YEAR_SPEED } from './data/songs.js';
-import Splash from './components/Splash.jsx';
-import Header from './components/Header.jsx';
-import Chart from './components/Chart.jsx';
-import Controls from './components/Controls.jsx';
+import {
+  songs, RANK_COLORS, GENRE_BG,
+  RANKS, LANE_PROPS, WINDOW, START_YEAR, END_YEAR, YEAR_SPEED,
+} from './data/songs.js';
+import Splash    from './components/Splash.jsx';
+import Header    from './components/Header.jsx';
+import Chart     from './components/Chart.jsx';
+import Controls  from './components/Controls.jsx';
 
 export default function App() {
   const svgRef       = useRef(null);
   const facesRef     = useRef(null);
   const chartWrapRef = useRef(null);
   const sliderElRef  = useRef(null);
-  const engine       = useRef({
-    togglePlay:     () => {},
-    toggleMute:     () => {},
-    goToYear:       () => {},
-    launchApp:      () => {},
-  });
+  const engine       = useRef({ togglePlay:()=>{}, toggleMute:()=>{}, goToYear:()=>{}, launchApp:()=>{} });
 
   const [splashHiding, setSplashHiding] = useState(false);
   const [splashGone,   setSplashGone]   = useState(false);
@@ -26,11 +24,10 @@ export default function App() {
   const [isMuted,      setIsMuted]      = useState(false);
   const [header, setHeader] = useState({
     year: START_YEAR, title: '난 알아요', artist: '서태지와 아이들',
-    streak: 0, showStreak: false,
+    genre: '댄스', streak: 0, showStreak: false,
   });
 
   useEffect(() => {
-    // All mutable animation state in a plain object — no re-renders
     const s = {
       yrF: START_YEAR, yrI: START_YEAR,
       playing: false, muted: false,
@@ -45,27 +42,41 @@ export default function App() {
     // ── Layout helpers ────────────────────────────────
     function chartDims() {
       const w = chartWrapRef.current;
-      return w ? { W: w.clientWidth, H: w.clientHeight } : { W: 800, H: 600 };
+      return w ? { W: w.clientWidth, H: w.clientHeight } : { W: 900, H: 600 };
     }
+
+    // Rank 1 owns the left 45%, rank 2 the next 32%, rank 3 the last 23%
     function laneX(rank) {
       const { W } = chartDims();
-      const lw = W / RANKS;
-      return (rank - 1) * lw + lw / 2;
+      let left = 0;
+      for (let i = 0; i < rank - 1; i++) left += LANE_PROPS[i];
+      return (left + LANE_PROPS[rank - 1] / 2) * W;
     }
+
     function yearY(year) {
       const { H } = chartDims();
       return (s.yrF - year + 0.5) * (H / WINDOW);
     }
-    function cardSize() {
+
+    function cardSize(rank) {
       const { W, H } = chartDims();
-      const lw = W / RANKS;
+      const lw = LANE_PROPS[rank - 1] * W;
       const rh = H / WINDOW;
-      const CW = Math.min(lw - 24, 200);
+      if (rank === 1) {
+        const CW = Math.min(lw - 36, 300);
+        const CH = Math.min(Math.round(CW * 0.62), Math.round(rh * 1.05));
+        return { CW, CH, rh };
+      }
+      const CW = Math.min(lw - (rank === 2 ? 28 : 22), rank === 2 ? 210 : 170);
       const CH = Math.round(CW * 0.72);
-      return { CW, CH, rh, lw };
+      return { CW, CH, rh };
     }
+
+    // Rank 1 fully opaque at current year; ranks 2–3 slightly dimmer
     function cardOpacity(song) {
-      return Math.max(0.10, 1 - (s.yrF - song.y) * (0.72 / WINDOW));
+      const ageFade  = Math.max(0.10, 1 - (s.yrF - song.y) * (0.72 / WINDOW));
+      const rankMult = song.r === 1 ? 1.0 : song.r === 2 ? 0.80 : 0.62;
+      return ageFade * rankMult;
     }
 
     // ── D3 glow filter ────────────────────────────────
@@ -105,17 +116,17 @@ export default function App() {
       svg.selectAll('.a-path').data(rest, key).join('path')
         .attr('class', 'a-path').attr('fill', 'none')
         .attr('stroke', d => RANK_COLORS[d.pts[0].r - 1] || '#555')
-        .attr('stroke-width', 1.5).attr('stroke-linecap', 'round').attr('stroke-opacity', .28);
+        .attr('stroke-width', 1.5).attr('stroke-linecap', 'round').attr('stroke-opacity', .22);
 
       svg.selectAll('.glow-path').data(r1, key).join('path')
         .attr('class', 'glow-path').attr('fill', 'none')
-        .attr('stroke', '#ff6b9d').attr('stroke-width', 18).attr('stroke-linecap', 'round')
-        .attr('filter', 'url(#glow-filter)').attr('stroke-opacity', .22);
+        .attr('stroke', '#ff6b9d').attr('stroke-width', 22).attr('stroke-linecap', 'round')
+        .attr('filter', 'url(#glow-filter)').attr('stroke-opacity', .18);
 
       svg.selectAll('.rank1-path').data(r1, key).join('path')
         .attr('class', 'rank1-path').attr('fill', 'none')
-        .attr('stroke', '#ff6b9d').attr('stroke-width', 3.5).attr('stroke-linecap', 'round')
-        .attr('stroke-opacity', .9);
+        .attr('stroke', '#ff6b9d').attr('stroke-width', 3).attr('stroke-linecap', 'round')
+        .attr('stroke-opacity', .85);
     }
 
     function updateLines() {
@@ -139,7 +150,6 @@ export default function App() {
       const visKeys  = new Set(visible.map(song => song.t + '|' + song.y));
       const facesEl  = facesRef.current;
       if (!facesEl) return;
-      const { CW, CH, rh } = cardSize();
 
       for (const [key, info] of s.cardEls) {
         if (!visKeys.has(key) && !info.dying) {
@@ -154,6 +164,7 @@ export default function App() {
       for (const song of visible) {
         const key = song.t + '|' + song.y;
         if (s.cardEls.has(key)) continue;
+        const { CW, CH, rh } = cardSize(song.r);
         const el = document.createElement('div');
         el.className = `face-card rank${song.r}`;
         el.style.width  = CW + 'px';
@@ -163,17 +174,28 @@ export default function App() {
         else         el.style.backgroundColor = GENRE_BG[song.g] || '#1a1a2e';
         el.style.left      = (laneX(song.r) - CW / 2) + 'px';
         el.style.top       = (yearY(song.y) - CH / 2) + 'px';
-        el.style.transform = `translateY(-${rh * 0.75}px)`;
+        el.style.transform = `translateY(-${rh * 0.7}px)`;
         el.style.opacity   = '0';
-        el.innerHTML = `
-          <div class="card-overlay">
-            <span class="card-title">${song.t}</span>
-            <span class="card-artist">${song.a}</span>
-          </div>
-          <div class="card-rank-badge">${song.r}위</div>`;
-        el.addEventListener('click', () => { if (song.id) loadSong(song.id, song.t, song.a, song.y); });
+
+        if (song.r === 1) {
+          el.innerHTML = `
+            <div class="card-overlay r1-overlay">
+              <span class="card-genre">${song.g}</span>
+              <span class="card-title r1-title">${song.t}</span>
+              <span class="card-artist">${song.a}</span>
+            </div>`;
+        } else {
+          el.innerHTML = `
+            <div class="card-overlay">
+              <span class="card-title">${song.t}</span>
+              <span class="card-artist">${song.a}</span>
+            </div>
+            <div class="card-rank-badge">${song.r}위</div>`;
+        }
+
+        el.addEventListener('click', () => { if (song.id) loadSong(song); });
         facesEl.appendChild(el);
-        const info = { el, dying: false, slideTimer: null };
+        const info = { el, dying: false, slideTimer: null, rank: song.r };
         s.cardEls.set(key, info);
         requestAnimationFrame(() => {
           el.style.transition = 'opacity 0.7s ease, transform 0.9s cubic-bezier(0.22,1,0.36,1)';
@@ -187,12 +209,12 @@ export default function App() {
     }
 
     function updatePositions() {
-      const { CW, CH } = cardSize();
       const winStart = s.yrI - WINDOW + 1;
       const visible  = songs.filter(song => song.y >= winStart && song.y <= s.yrI);
       for (const song of visible) {
         const info = s.cardEls.get(song.t + '|' + song.y);
         if (!info || info.dying || info.el.style.transition !== '') continue;
+        const { CW, CH } = cardSize(song.r);
         info.el.style.left    = (laneX(song.r) - CW / 2) + 'px';
         info.el.style.top     = (yearY(song.y) - CH / 2) + 'px';
         info.el.style.opacity = String(cardOpacity(song));
@@ -210,105 +232,61 @@ export default function App() {
         else s.streakCount++;
         showStreak = true;
       } else {
-        s.streakCount = 1;
-        s.streakArtist = top1.a;
+        s.streakCount = 1; s.streakArtist = top1.a;
       }
-      setHeader({ year: s.yrI, title: top1.t, artist: top1.a, streak: s.streakCount, showStreak });
+      setHeader({ year: s.yrI, title: top1.t, artist: top1.a, genre: top1.g, streak: s.streakCount, showStreak });
     }
 
-    // ── DJ scratch synthesizer ────────────────────────
-    let audioCtx = null;
+    // ── Music fade ────────────────────────────────────
+    let fadeTimerId = null;
 
-    function ensureCtx() {
-      if (!audioCtx || audioCtx.state === 'closed') audioCtx = new AudioContext();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      return audioCtx;
+    function cancelFade() {
+      clearTimeout(fadeTimerId);
+      fadeTimerId = null;
     }
 
-    function playScratch() {
-      try {
-        const ctx = ensureCtx();
-        const now = ctx.currentTime;
-
-        // Two scratch strokes: forward then backward, like a real DJ cue
-        [-1, 1].forEach((dir, i) => {
-          const onset = now + i * 0.13;
-          const dur   = 0.14;
-          const len   = Math.ceil(ctx.sampleRate * dur);
-          const buf   = ctx.createBuffer(1, len, ctx.sampleRate);
-          const data  = buf.getChannelData(0);
-
-          for (let n = 0; n < len; n++) {
-            const t     = n / len;
-            const env   = Math.sin(t * Math.PI);             // bell shape
-            const noise = Math.random() * 2 - 1;
-            // Amplitude modulation mimics the "wicky" vinyl texture
-            const mod   = 0.6 + 0.4 * Math.sin(t * 38 * dir);
-            data[n]     = noise * env * mod;
-          }
-
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-
-          // Sweep bandpass: low→high on forward stroke, high→low on backward
-          const bpf = ctx.createBiquadFilter();
-          bpf.type = 'bandpass';
-          bpf.Q.value = 2.8;
-          const fStart = dir > 0 ? 600  : 3200;
-          const fEnd   = dir > 0 ? 3200 : 600;
-          bpf.frequency.setValueAtTime(fStart, onset);
-          bpf.frequency.exponentialRampToValueAtTime(fEnd, onset + dur);
-
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(0, onset);
-          gain.gain.linearRampToValueAtTime(0.55, onset + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, onset + dur);
-
-          src.connect(bpf);
-          bpf.connect(gain);
-          gain.connect(ctx.destination);
-          src.start(onset);
-          src.stop(onset + dur + 0.02);
-        });
-      } catch (e) { /* AudioContext blocked (e.g. no user gesture yet) */ }
+    function rampVolume(from, to, durationMs, onDone) {
+      cancelFade();
+      const STEPS = 20;
+      const dt    = durationMs / STEPS;
+      let step    = 0;
+      const tick = () => {
+        step++;
+        const vol = Math.round(from + (to - from) * (step / STEPS));
+        try { s.ytPlayer.setVolume(Math.max(0, Math.min(100, vol))); } catch (e) {}
+        if (step < STEPS) {
+          fadeTimerId = setTimeout(tick, dt);
+        } else {
+          fadeTimerId = null;
+          if (onDone) onDone();
+        }
+      };
+      tick();
     }
 
     // ── YouTube ───────────────────────────────────────
-    function loadSong(ytId, title, artist, year) {
-      if (!s.ytReady || !ytId || s.muted) return;
-      const key = year + ':' + ytId;
+    function loadSong(song) {
+      if (!s.ytReady || !song.id || s.muted) return;
+      const key = song.y + ':' + song.id;
       if (key === s.lastSongKey) return;
       s.lastSongKey = key;
+      const startSec = song.s ?? 45;
 
-      // 1 — scratch sound
-      playScratch();
-
-      // 2 — visual flash on the now-playing block
-      const npEl = document.getElementById('now-playing');
-      if (npEl) {
-        npEl.classList.remove('dj-flash');
-        void npEl.offsetWidth;
-        npEl.classList.add('dj-flash');
-      }
-
-      // 3 — spin the current track down, then load the new one
-      const yt = s.ytPlayer;
-      try { yt.setPlaybackRate(0.5); } catch (e) {}
-      setTimeout(() => { try { yt.setPlaybackRate(0.15); } catch (e) {} }, 110);
-      setTimeout(() => {
+      rampVolume(100, 0, 420, () => {
         try {
-          yt.setPlaybackRate(1);
-          yt.loadVideoById({ videoId: ytId, startSeconds: 30 });
+          s.ytPlayer.loadVideoById({ videoId: song.id, startSeconds: startSec });
+          setTimeout(() => rampVolume(0, 100, 550), 220);
         } catch (e) {}
-      }, 340);
+      });
     }
 
     function playCurrent() {
       const top1 = songs.find(song => song.y === s.yrI && song.r === 1);
-      if (top1 && top1.id && !s.muted && s.ytReady) loadSong(top1.id, top1.t, top1.a, top1.y);
+      if (top1 && top1.id && !s.muted && s.ytReady) loadSong(top1);
     }
 
     function stopAudio() {
+      cancelFade();
       if (s.ytReady) try { s.ytPlayer.stopVideo(); } catch (e) {}
       s.lastSongKey = null;
     }
@@ -372,15 +350,12 @@ export default function App() {
       const el = sliderElRef.current;
       if (!el) return;
       s.slider = noUiSlider.create(el, {
-        start: [START_YEAR],
-        step: 0.02,
+        start: [START_YEAR], step: 0.02,
         range: { min: START_YEAR, max: END_YEAR },
         tooltips: [{ to: v => Math.round(v) + '년', from: v => +v.replace('년', '') }],
         pips: {
-          mode: 'values',
-          values: [1995, 2000, 2005, 2010, 2015, 2020],
-          density: 4,
-          format: { to: v => v + '', from: v => +v },
+          mode: 'values', values: [1995, 2000, 2005, 2010, 2015, 2020],
+          density: 4, format: { to: v => v + '', from: v => +v },
         },
       });
       s.slider.on('start', () => { s.dragging = true; stopPlay(); });
@@ -394,13 +369,14 @@ export default function App() {
     // ── Lane dividers ─────────────────────────────────
     function initLanes() {
       const { W } = chartDims();
-      const lw   = W / RANKS;
-      const wrap = chartWrapRef.current;
+      const wrap  = chartWrapRef.current;
       if (!wrap) return;
-      for (let r = 1; r < RANKS; r++) {
+      let acc = 0;
+      for (let i = 0; i < RANKS - 1; i++) {
+        acc += LANE_PROPS[i];
         const d = document.createElement('div');
         d.className  = 'lane-div';
-        d.style.left = (r * lw) + 'px';
+        d.style.left = (acc * W) + 'px';
         wrap.appendChild(d);
       }
     }
@@ -413,13 +389,9 @@ export default function App() {
       setTimeout(() => setSplashGone(true), 650);
       setAppVisible(true);
       setTimeout(() => {
-        initLanes();
-        initSlider();
-        rebuildCards();
-        rebuildLines();
-        updatePositions();
-        updateLines();
-        updateHeader();
+        initLanes(); initSlider();
+        rebuildCards(); rebuildLines();
+        updatePositions(); updateLines(); updateHeader();
         startPlay();
       }, 120);
     }
@@ -454,20 +426,22 @@ export default function App() {
       rT = setTimeout(() => {
         document.querySelectorAll('.lane-div').forEach(e => e.remove());
         initLanes();
-        const { CW, CH } = cardSize();
         for (const [, info] of s.cardEls) {
-          if (!info.dying) { info.el.style.width = CW + 'px'; info.el.style.height = CH + 'px'; }
+          if (!info.dying) {
+            const { CW, CH } = cardSize(info.rank);
+            info.el.style.width = CW + 'px'; info.el.style.height = CH + 'px';
+          }
         }
         rebuildLines(); updatePositions(); updateLines();
       }, 200);
     }
     window.addEventListener('resize', onResize);
 
-    // ── Expose API to React callbacks ─────────────────
     engine.current = { togglePlay, toggleMute, goToYear, launchApp };
 
     return () => {
       cancelAnimationFrame(s.rafId);
+      cancelFade();
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', onResize);
       window.onYouTubeIframeAPIReady = null;
@@ -484,7 +458,7 @@ export default function App() {
         />
       )}
       <div id="app" className={appVisible ? 'visible' : ''}>
-        <Header {...header} />
+        <Header {...header} isPlaying={isPlaying} />
         <Chart svgRef={svgRef} facesRef={facesRef} chartWrapRef={chartWrapRef} />
         <Controls
           isPlaying={isPlaying}
